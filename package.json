@@ -18,5 +18,10 @@
         "tailwindcss": "^3.2.1",
         "vite": "^6.2.4",
         "vue": "^3.4.0"
+    },
+    "dependencies": {
+        "@popperjs/core": "^2.11.8",
+        "chart.js": "^4.4.9",
+        "v-calendar": "^3.1.2"
     }
 }
