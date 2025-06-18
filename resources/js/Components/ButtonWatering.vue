@@ -23,14 +23,18 @@
                     >
                         <div class="button-content">
                             <div class="button-icon">
-                                <i
-                                    v-if="!isWatering && !isLoading"
-                                    class="fas fa-play"
-                                ></i>
-                                <i
-                                    v-else-if="isWatering"
-                                    class="fas fa-pause"
-                                ></i>
+                                <i v-if="!isWatering && !isLoading"
+                                    ><img
+                                        src="/assets/images/water-can.png"
+                                        alt=""
+                                        style="width: 54px; height: 54px"
+                                /></i>
+                                <i v-else-if="isWatering"
+                                    ><img
+                                        src="/assets/images/wtering-can.png"
+                                        alt=""
+                                        style="width: 70px"
+                                /></i>
                                 <div v-else class="loading-spinner"></div>
                             </div>
                             <div class="button-text">
@@ -50,177 +54,10 @@
                                 :style="{ animationDelay: n * 0.2 + 's' }"
                             ></div>
                         </div>
-
-                        <!-- Progress Ring -->
-                        <div v-if="isWatering" class="progress-ring">
-                            <svg
-                                class="progress-ring-svg"
-                                width="120"
-                                height="120"
-                            >
-                                <circle
-                                    class="progress-ring-circle-bg"
-                                    stroke="#e5e7eb"
-                                    stroke-width="4"
-                                    fill="transparent"
-                                    r="54"
-                                    cx="60"
-                                    cy="60"
-                                />
-                                <circle
-                                    class="progress-ring-circle"
-                                    :stroke="getProgressColor()"
-                                    stroke-width="4"
-                                    fill="transparent"
-                                    r="54"
-                                    cx="60"
-                                    cy="60"
-                                    :style="{
-                                        strokeDasharray: circumference,
-                                        strokeDashoffset: strokeDashoffset,
-                                    }"
-                                />
-                            </svg>
-                            <div class="progress-text">
-                                <div class="progress-percentage">
-                                    {{ wateringProgress }}%
-                                </div>
-                                <div class="progress-label">Complete</div>
-                            </div>
-                        </div>
                     </button>
-                </div>
-
-                <!-- Quick Actions -->
-                <div class="quick-actions">
-                    <div class="action-row">
-                        <button
-                            @click="startScheduledWatering"
-                            :disabled="isWatering || isSystemMaintenance"
-                            class="quick-btn schedule-btn"
-                        >
-                            <i class="fas fa-clock"></i>
-                            <span>Schedule</span>
-                        </button>
-
-                        <button
-                            @click="emergencyWatering"
-                            :disabled="
-                                isWatering || isSystemMaintenance || isLowWater
-                            "
-                            class="quick-btn emergency-btn"
-                        >
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <span>Emergency</span>
-                        </button>
-
-                        <button
-                            @click="testSystem"
-                            :disabled="isWatering || isSystemMaintenance"
-                            class="quick-btn test-btn"
-                        >
-                            <i class="fas fa-flask"></i>
-                            <span>Test</span>
-                        </button>
-                    </div>
                 </div>
 
                 <!-- System Info -->
-                <div class="system-info">
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <div
-                                class="info-icon water-level"
-                                :class="getWaterLevelClass()"
-                            >
-                                <i class="fas fa-tint"></i>
-                            </div>
-                            <div class="info-content">
-                                <div class="info-label">Water Tank</div>
-                                <div class="info-value">{{ waterLevel }}%</div>
-                            </div>
-                        </div>
-
-                        <div class="info-item">
-                            <div
-                                class="info-icon pressure"
-                                :class="getPressureClass()"
-                            >
-                                <i class="fas fa-gauge-high"></i>
-                            </div>
-                            <div class="info-content">
-                                <div class="info-label">Pressure</div>
-                                <div class="info-value">{{ pressure }} PSI</div>
-                            </div>
-                        </div>
-
-                        <div class="info-item">
-                            <div class="info-icon flow-rate">
-                                <i class="fas fa-water"></i>
-                            </div>
-                            <div class="info-content">
-                                <div class="info-label">Flow Rate</div>
-                                <div class="info-value">
-                                    {{ flowRate }} L/min
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Schedule Modal -->
-        <div
-            v-if="showScheduleModal"
-            class="modal-overlay"
-            @click="closeScheduleModal"
-        >
-            <div class="schedule-modal" @click.stop>
-                <div class="modal-header">
-                    <h6>⏰ Schedule Watering</h6>
-                    <button @click="closeScheduleModal" class="close-btn">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <div class="schedule-form">
-                        <div class="form-group">
-                            <label>Duration (minutes)</label>
-                            <input
-                                v-model="scheduleDuration"
-                                type="number"
-                                min="1"
-                                max="60"
-                                class="form-input"
-                            />
-                        </div>
-                        <div class="form-group">
-                            <label>Start Time</label>
-                            <input
-                                v-model="scheduleTime"
-                                type="time"
-                                class="form-input"
-                            />
-                        </div>
-                        <div class="form-group">
-                            <label>Repeat</label>
-                            <select v-model="scheduleRepeat" class="form-input">
-                                <option value="once">Once</option>
-                                <option value="daily">Daily</option>
-                                <option value="weekly">Weekly</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button @click="closeScheduleModal" class="btn-secondary">
-                        Cancel
-                    </button>
-                    <button @click="confirmSchedule" class="btn-primary">
-                        Schedule
-                    </button>
-                </div>
             </div>
         </div>
     </div>
@@ -241,10 +78,7 @@ export default {
             pressure: 45,
             flowRate: 2.5,
             isLowWater: false,
-            showScheduleModal: false,
-            scheduleDuration: 10,
-            scheduleTime: "",
-            scheduleRepeat: "once",
+
             recentActivities: [
                 {
                     id: 1,

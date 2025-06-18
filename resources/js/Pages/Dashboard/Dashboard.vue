@@ -45,9 +45,6 @@
                 <!-- bagian button watering -->
                 <ButtonWatering />
                 <!-- slot untuk calender -->
-
-                <!-- bagian untuk plant care -->
-                <PlantCare />
             </div>
         </div>
     </DashboardLayout>
@@ -57,7 +54,6 @@
 import DashboardLayout from "../../Layouts/DashboardLayouts.vue";
 import Grafik from "../../Components/Grafik.vue";
 import MonitoringTrack from "../../Components/MonitoringTrack.vue";
-import PlantCare from "../../Components/PlantCare.vue";
 import ButtonWatering from "../../Components/ButtonWatering.vue";
 
 export default {
@@ -66,7 +62,6 @@ export default {
         DashboardLayout,
         Grafik,
         MonitoringTrack,
-        PlantCare,
         ButtonWatering,
     },
 };
