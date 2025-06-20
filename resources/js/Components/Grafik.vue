@@ -3,13 +3,29 @@
     <div class="card mt-24">
         <div class="card-body">
             <div class="mb-20 flex-between flex-wrap gap-8">
-                <h4 class="mb-0">Grafik Track</h4>
+                <div class="flex-align gap-16">
+                    <h4 class="mb-0">Grafik Track</h4>
+                    <div class="status-indicator">
+                        <span
+                            :class="[
+                                'status-dot',
+                                isRealTimeActive ? 'active' : 'inactive',
+                            ]"
+                        ></span>
+                        <span class="status-text">{{
+                            isRealTimeActive ? "Real-time ON" : "Real-time OFF"
+                        }}</span>
+                    </div>
+                </div>
                 <div class="flex-align gap-16 flex-wrap">
                     <select
                         class="form-select form-control text-13 px-8 pe-24 py-8 rounded-8 w-auto"
                         v-model="selectedPeriod"
                         @change="updateChart"
                     >
+                        <option value="realtime">
+                            Real-time (Last 20 points)
+                        </option>
                         <option value="yearly">Yearly</option>
                         <option value="monthly">Monthly</option>
                         <option value="weekly">Weekly</option>
@@ -29,30 +45,166 @@
                     </select>
                 </div>
             </div>
+
+            <!-- Loading indicator -->
+            <div v-if="isLoading" class="loading-indicator">
+                <span class="loading-spinner"></span>
+                <span>Loading sensor data...</span>
+            </div>
+
             <div class="chart-container">
                 <canvas ref="chartCanvas" id="environmentChart"></canvas>
+            </div>
+
+            <!-- Last update info -->
+            <div class="last-update" v-if="lastUpdate">
+                <span>Last update: {{ formatDateTime(lastUpdate) }}</span>
             </div>
         </div>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, nextTick } from "vue";
 import { Chart, registerables } from "chart.js";
+import axios from "axios";
 
 // Register Chart.js components
 Chart.register(...registerables);
 
 // Reactive variables
 const chartCanvas = ref(null);
-const selectedPeriod = ref("monthly");
+const selectedPeriod = ref("realtime");
 const selectedFilter = ref("all");
+const isRealTimeActive = ref(false);
+const isLoading = ref(false);
+const lastUpdate = ref(null);
 let chartInstance = null;
+let realTimeInterval = null;
 
-// Sample data untuk demonstrasi
-const sampleData = {
-    yearly: {
-        labels: [
+// Real-time data storage
+const realtimeData = ref({
+    labels: [],
+    humidity: [],
+    temperature: [],
+    soilMoisture: [],
+});
+
+// Maximum points to keep in real-time mode
+const MAX_REALTIME_POINTS = 20;
+
+// Historical data storage
+const historicalData = ref({
+    yearly: { labels: [], humidity: [], temperature: [], soilMoisture: [] },
+    monthly: { labels: [], humidity: [], temperature: [], soilMoisture: [] },
+    weekly: { labels: [], humidity: [], temperature: [], soilMoisture: [] },
+    today: { labels: [], humidity: [], temperature: [], soilMoisture: [] },
+});
+
+// API Functions
+const fetchLatestSensorData = async () => {
+    try {
+        const [suhuResponse, tanahResponse] = await Promise.all([
+            axios.get("/api/Suhu/latest"),
+            axios.get("/api/Tanah/latest"),
+        ]);
+
+        const suhuData = suhuResponse.data.data;
+        const tanahData = tanahResponse.data.data;
+
+        return {
+            temperature: suhuData?.nilai_temperatur || 0,
+            humidity: suhuData?.nilai_humidity || 0,
+            soilMoisture: tanahData?.nilai_humidity || 0,
+            timestamp: new Date(),
+        };
+    } catch (err) {
+        console.error("Error fetching sensor data:", err);
+        // Return fallback data instead of throwing error
+        return {
+            temperature: 0,
+            humidity: 0,
+            soilMoisture: 0,
+            timestamp: new Date(),
+        };
+    }
+};
+
+// Fetch historical data from API
+const fetchHistoricalData = async (period) => {
+    try {
+        isLoading.value = true;
+        let startDate, endDate;
+        const now = new Date();
+
+        switch (period) {
+            case "yearly":
+                startDate = new Date(now.getFullYear(), 0, 1);
+                endDate = now;
+                break;
+            case "monthly":
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = now;
+                break;
+            case "weekly":
+                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                endDate = now;
+                break;
+            case "today":
+                startDate = new Date(
+                    now.getFullYear(),
+                    now.getMonth(),
+                    now.getDate()
+                );
+                endDate = now;
+                break;
+            default:
+                throw new Error("Invalid period");
+        }
+
+        const [suhuResponse, tanahResponse] = await Promise.all([
+            axios.post("/api/Suhu/date-range", {
+                start_date: startDate.toISOString().split("T")[0],
+                end_date: endDate.toISOString().split("T")[0],
+            }),
+            axios.post("/api/Tanah/date-range", {
+                start_date: startDate.toISOString().split("T")[0],
+                end_date: endDate.toISOString().split("T")[0],
+            }),
+        ]);
+
+        const suhuData = suhuResponse.data.data || [];
+        const tanahData = tanahResponse.data.data || [];
+
+        // Process data based on period
+        const processedData = processDataByPeriod(suhuData, tanahData, period);
+        historicalData.value[period] = processedData;
+
+        return processedData;
+    } catch (err) {
+        console.error(`Error fetching ${period} data:`, err);
+        // Return empty data structure if API fails
+        return {
+            labels: [],
+            humidity: [],
+            temperature: [],
+            soilMoisture: [],
+        };
+    } finally {
+        isLoading.value = false;
+    }
+};
+
+// Process data based on selected period
+const processDataByPeriod = (suhuData, tanahData, period) => {
+    const labels = [];
+    const humidity = [];
+    const temperature = [];
+    const soilMoisture = [];
+
+    if (period === "yearly") {
+        // Group by month
+        const months = [
             "Jan",
             "Feb",
             "Mar",
@@ -65,34 +217,293 @@ const sampleData = {
             "Oct",
             "Nov",
             "Dec",
-        ],
-        humidity: [65, 68, 70, 72, 75, 78, 80, 82, 79, 76, 71, 67],
-        temperature: [24, 25, 26, 28, 30, 32, 34, 33, 31, 29, 27, 25],
-        soilMoisture: [45, 48, 52, 55, 58, 60, 62, 59, 56, 53, 50, 47],
-    },
-    monthly: {
-        labels: ["Week 1", "Week 2", "Week 3", "Week 4"],
-        humidity: [70, 72, 68, 75],
-        temperature: [26, 28, 25, 29],
-        soilMoisture: [52, 55, 50, 58],
-    },
-    weekly: {
-        labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        humidity: [68, 70, 72, 71, 73, 69, 67],
-        temperature: [25, 27, 28, 26, 29, 24, 23],
-        soilMoisture: [50, 52, 54, 53, 55, 49, 48],
-    },
-    today: {
-        labels: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
-        humidity: [65, 68, 72, 75, 73, 70],
-        temperature: [22, 23, 28, 32, 30, 26],
-        soilMoisture: [48, 50, 52, 51, 53, 49],
-    },
+        ];
+        const monthlyData = {};
+
+        // Initialize monthly data
+        months.forEach((month, index) => {
+            monthlyData[index] = {
+                humidity: [],
+                temperature: [],
+                soilMoisture: [],
+            };
+        });
+
+        // Group suhu data by month
+        suhuData.forEach((item) => {
+            const month = new Date(item.created_at).getMonth();
+            monthlyData[month].humidity.push(item.nilai_humidity);
+            monthlyData[month].temperature.push(item.nilai_temperatur);
+        });
+
+        // Group tanah data by month
+        tanahData.forEach((item) => {
+            const month = new Date(item.created_at).getMonth();
+            monthlyData[month].soilMoisture.push(item.nilai_humidity);
+        });
+
+        // Calculate averages
+        months.forEach((month, index) => {
+            labels.push(month);
+            humidity.push(calculateAverage(monthlyData[index].humidity));
+            temperature.push(calculateAverage(monthlyData[index].temperature));
+            soilMoisture.push(
+                calculateAverage(monthlyData[index].soilMoisture)
+            );
+        });
+    } else if (period === "monthly") {
+        // Group by week
+        for (let i = 1; i <= 4; i++) {
+            labels.push(`Week ${i}`);
+            // You can implement more sophisticated week grouping here
+            const weekHumidity = suhuData
+                .filter(
+                    (_, index) =>
+                        Math.floor(index / (suhuData.length / 4)) === i - 1
+                )
+                .map((item) => item.nilai_humidity);
+            const weekTemperature = suhuData
+                .filter(
+                    (_, index) =>
+                        Math.floor(index / (suhuData.length / 4)) === i - 1
+                )
+                .map((item) => item.nilai_temperatur);
+            const weekSoilMoisture = tanahData
+                .filter(
+                    (_, index) =>
+                        Math.floor(index / (tanahData.length / 4)) === i - 1
+                )
+                .map((item) => item.nilai_humidity);
+
+            humidity.push(calculateAverage(weekHumidity));
+            temperature.push(calculateAverage(weekTemperature));
+            soilMoisture.push(calculateAverage(weekSoilMoisture));
+        }
+    } else if (period === "weekly") {
+        // Group by day
+        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        const dailyData = {};
+
+        // Initialize daily data
+        days.forEach((day, index) => {
+            dailyData[index] = {
+                humidity: [],
+                temperature: [],
+                soilMoisture: [],
+            };
+        });
+
+        // Group suhu data by day
+        suhuData.forEach((item) => {
+            const dayOfWeek = (new Date(item.created_at).getDay() + 6) % 7; // Monday = 0
+            dailyData[dayOfWeek].humidity.push(item.nilai_humidity);
+            dailyData[dayOfWeek].temperature.push(item.nilai_temperatur);
+        });
+
+        // Group tanah data by day
+        tanahData.forEach((item) => {
+            const dayOfWeek = (new Date(item.created_at).getDay() + 6) % 7; // Monday = 0
+            dailyData[dayOfWeek].soilMoisture.push(item.nilai_humidity);
+        });
+
+        // Calculate averages
+        days.forEach((day, index) => {
+            labels.push(day);
+            humidity.push(calculateAverage(dailyData[index].humidity));
+            temperature.push(calculateAverage(dailyData[index].temperature));
+            soilMoisture.push(calculateAverage(dailyData[index].soilMoisture));
+        });
+    } else if (period === "today") {
+        // Group by hour (4-hour intervals)
+        const hours = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"];
+        const hourlyData = {};
+
+        // Initialize hourly data
+        hours.forEach((hour, index) => {
+            hourlyData[index * 4] = {
+                humidity: [],
+                temperature: [],
+                soilMoisture: [],
+            };
+        });
+
+        // Group suhu data by hour
+        suhuData.forEach((item) => {
+            const hour = new Date(item.created_at).getHours();
+            const interval = Math.floor(hour / 4) * 4;
+            if (hourlyData[interval]) {
+                hourlyData[interval].humidity.push(item.nilai_humidity);
+                hourlyData[interval].temperature.push(item.nilai_temperatur);
+            }
+        });
+
+        // Group tanah data by hour
+        tanahData.forEach((item) => {
+            const hour = new Date(item.created_at).getHours();
+            const interval = Math.floor(hour / 4) * 4;
+            if (hourlyData[interval]) {
+                hourlyData[interval].soilMoisture.push(item.nilai_humidity);
+            }
+        });
+
+        // Calculate averages
+        hours.forEach((hour, index) => {
+            labels.push(hour);
+            const interval = index * 4;
+            humidity.push(
+                calculateAverage(hourlyData[interval]?.humidity || [])
+            );
+            temperature.push(
+                calculateAverage(hourlyData[interval]?.temperature || [])
+            );
+            soilMoisture.push(
+                calculateAverage(hourlyData[interval]?.soilMoisture || [])
+            );
+        });
+    }
+
+    return { labels, humidity, temperature, soilMoisture };
+};
+
+// Calculate average of array
+const calculateAverage = (arr) => {
+    if (!arr || arr.length === 0) return 0;
+    return (
+        Math.round(
+            (arr.reduce((sum, val) => sum + val, 0) / arr.length) * 100
+        ) / 100
+    );
+};
+
+// Add new data point to real-time chart
+// Perbaiki fungsi addRealtimeDataPoint untuk mencegah referensi siklik
+const addRealtimeDataPoint = (newData) => {
+    const timeLabel = new Date(newData.timestamp).toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+
+    // PERBAIKAN: Clone data primitif untuk menghindari referensi reaktif siklik
+    const temperature = Number(newData.temperature);
+    const humidity = Number(newData.humidity);
+    const soilMoisture = Number(newData.soilMoisture);
+
+    // Add new data
+    realtimeData.value.labels.push(timeLabel);
+    realtimeData.value.temperature.push(temperature);
+    realtimeData.value.humidity.push(humidity);
+    realtimeData.value.soilMoisture.push(soilMoisture);
+
+    // Keep only the last MAX_REALTIME_POINTS
+    if (realtimeData.value.labels.length > MAX_REALTIME_POINTS) {
+        realtimeData.value.labels.shift();
+        realtimeData.value.temperature.shift();
+        realtimeData.value.humidity.shift();
+        realtimeData.value.soilMoisture.shift();
+    }
+
+    lastUpdate.value = new Date(newData.timestamp);
+};
+
+// Start real-time monitoring (auto-starts)
+// Perbaiki fungsi startRealTime untuk menghindari referensi siklik dalam data reaktif
+const startRealTime = async () => {
+    if (isRealTimeActive.value) return;
+
+    isRealTimeActive.value = true;
+
+    // Set up interval for real-time updates
+    realTimeInterval = setInterval(async () => {
+        try {
+            const newData = await fetchLatestSensorData();
+
+            // PERBAIKAN: Pastikan data tidak siklik dan primitif
+            const cleanData = {
+                temperature: Number(newData.temperature),
+                humidity: Number(newData.humidity),
+                soilMoisture: Number(newData.soilMoisture),
+                timestamp: new Date(),
+            };
+
+            addRealtimeDataPoint(cleanData);
+
+            if (selectedPeriod.value === "realtime" && chartInstance) {
+                // PERBAIKAN: Clone data chart dan update dengan data baru
+                updateChartWithCleanData();
+            }
+        } catch (err) {
+            console.error("Real-time update error:", err);
+            // Continue running even if there's an error
+        }
+    }, 1000); // Update every 1 seconds for more real-time feel
+};
+
+// PERBAIKAN: Fungsi baru untuk update chart dengan data yang bersih
+const updateChartWithCleanData = () => {
+    if (!chartInstance) return;
+
+    // Ambil konfigurasi chart dengan data terbaru
+    const config = getChartConfig();
+
+    // Update label dan dataset secara terpisah untuk menghindari referensi siklik
+    chartInstance.data.labels = [...config.data.labels];
+
+    // Update setiap dataset dengan nilai primitif yang baru
+    config.data.datasets.forEach((dataset, i) => {
+        // Pastikan dataset ada
+        if (!chartInstance.data.datasets[i]) return;
+
+        // Update dataset dengan nilai baru
+        chartInstance.data.datasets[i].data = [...dataset.data];
+    });
+
+    // Update chart dengan animasi
+    chartInstance.update("active");
+};
+
+// Format date time for display
+const formatDateTime = (date) => {
+    return new Date(date).toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
 };
 
 // Chart configuration
+// Perbaiki fungsi getChartConfig untuk memastikan data tidak siklik
 const getChartConfig = () => {
-    const data = sampleData[selectedPeriod.value];
+    let data;
+
+    if (selectedPeriod.value === "realtime") {
+        // PERBAIKAN: Clone data untuk menghindari referensi siklik
+        data = {
+            labels: [...realtimeData.value.labels],
+            humidity: [...realtimeData.value.humidity],
+            temperature: [...realtimeData.value.temperature],
+            soilMoisture: [...realtimeData.value.soilMoisture],
+        };
+    } else {
+        // PERBAIKAN: Clone data untuk historical data juga
+        const histData = historicalData.value[selectedPeriod.value] || {
+            labels: [],
+            humidity: [],
+            temperature: [],
+            soilMoisture: [],
+        };
+
+        data = {
+            labels: [...histData.labels],
+            humidity: [...histData.humidity],
+            temperature: [...histData.temperature],
+            soilMoisture: [...histData.soilMoisture],
+        };
+    }
+
     const datasets = [];
 
     // Dataset untuk Humidity
@@ -161,6 +572,9 @@ const getChartConfig = () => {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: {
+                duration: selectedPeriod.value === "realtime" ? 750 : 1000,
+            },
             plugins: {
                 legend: {
                     display: true,
@@ -225,6 +639,10 @@ const getChartConfig = () => {
                             family: "Inter, sans-serif",
                         },
                         color: "#6b7280",
+                        maxTicksLimit:
+                            selectedPeriod.value === "realtime"
+                                ? 10
+                                : undefined,
                     },
                 },
                 y: {
@@ -261,20 +679,23 @@ const initChart = () => {
 };
 
 // Update chart when period changes
-const updateChart = () => {
+const updateChart = async () => {
+    if (selectedPeriod.value !== "realtime") {
+        // Fetch historical data for non-realtime periods
+        await fetchHistoricalData(selectedPeriod.value);
+    }
+
     if (chartInstance) {
-        const config = getChartConfig();
-        chartInstance.data = config.data;
-        chartInstance.update("active");
+        // PERBAIKAN: Gunakan updateChartWithCleanData untuk menghindari referensi siklik
+        updateChartWithCleanData();
     }
 };
 
 // Update chart when filter changes
 const updateChartFilter = () => {
     if (chartInstance) {
-        const config = getChartConfig();
-        chartInstance.data = config.data;
-        chartInstance.update("active");
+        // PERBAIKAN: Gunakan updateChartWithCleanData untuk menghindari referensi siklik
+        updateChartWithCleanData();
     }
 };
 
@@ -282,6 +703,37 @@ const updateChartFilter = () => {
 onMounted(async () => {
     await nextTick();
     initChart();
+
+    // Auto-start real-time monitoring
+    startRealTime();
+
+    // Load initial historical data
+    if (selectedPeriod.value !== "realtime") {
+        await fetchHistoricalData(selectedPeriod.value);
+        updateChart();
+    }
+});
+
+// Cleanup on unmount
+onUnmounted(() => {
+    stopRealTime();
+    if (chartInstance) {
+        chartInstance.destroy();
+    }
+});
+
+// Simple watcher replacement for period changes
+let previousPeriod = selectedPeriod.value;
+const checkPeriodChange = () => {
+    if (selectedPeriod.value !== previousPeriod) {
+        updateChart();
+        previousPeriod = selectedPeriod.value;
+    }
+    requestAnimationFrame(checkPeriodChange);
+};
+
+onMounted(() => {
+    checkPeriodChange();
 });
 </script>
 
@@ -390,5 +842,82 @@ h4 {
     font-weight: 600;
     color: #1f2937;
     font-family: "Inter", sans-serif;
+}
+
+/* Real-time specific styles */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.status-dot.active {
+    background-color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+    animation: pulse 2s infinite;
+}
+
+.status-dot.inactive {
+    background-color: #6b7280;
+}
+
+.status-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+}
+
+.loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background-color: #f3f4f6;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e5e7eb;
+    border-top: 2px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.last-update {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 </style>

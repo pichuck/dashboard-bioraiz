@@ -14,7 +14,7 @@
                         <div class="col-sm-7">
                             <div class="grettings-box__content py-xl-4">
                                 <h1 class="text-white mb-0 text-5xl">
-                                    Hello, Kadavi!
+                                    Hello, Petani!
                                 </h1>
                                 <p class="text-15 fw-light mt-4 text-white">
                                     Siram tanamanmu setiap hari
